@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Tuple, Any
+import math
 
 import gym
 from gym import spaces
@@ -14,6 +15,7 @@ from gym_d2d.envs.reward_fn import CueSinrNeighborRewardFunction
 from gym_d2d.id import Id
 from gym_d2d.link_type import LinkType
 from gym_d2d.simulator import Simulator, BASE_STATION_ID
+from gym_d2d.envs.env_config import EnvConfig
 
 EPISODE_LENGTH = 10
 DEFAULT_OBS_FN = LinearObsFunction
@@ -77,25 +79,34 @@ class D2DEnv(gym.Env):
         game_over = {'__all__': self.num_steps >= EPISODE_LENGTH}
         info = self._infos(self.actions, self.state)
 
+        print("running")
         return obs, rewards, game_over, info
+
+    def stepReward(self,actions:Actions):
+        self.state = self.simulator.step(self.actions)
+        obs = self.obs_fn.get_state(self.actions,self.state,self.simulator.devices)
+        rewards = self.reward_fn(self.actions,self.state)
+        info = self._infos(self.actions, self.state)
+
+        return obs, rewards, info
 
     def _extract_actions(self, raw_actions: Dict[str, Any]) -> Actions:
         actions = Actions()
         for id_pair_str, action in raw_actions.items():
             tx_rx_id = tuple([Id(_id) for _id in id_pair_str.split(':')])
-            actions[tx_rx_id] = self._extract_action(*tx_rx_id, action)
+            actions[tx_rx_id] = self._extract_action(*tx_rx_id, action,actions)
         return actions
 
-    def _extract_action(self, tx_id: Id, rx_id: Id, action: Any) -> Action:
+    def _extract_action(self, tx_id: Id, rx_id: Id, action: Any,actions: Actions) -> Action:
         if tx_id in self.simulator.devices.due_pairs:
             link_type = LinkType.SIDELINK
-            rb, tx_pwr_dBm = self._decode_action(action, 'due')
+            rb, tx_pwr_dBm = self._decode_action_for_DUE(action, 'due',actions)
         elif tx_id in self.simulator.devices.cues:
             link_type = LinkType.UPLINK
-            rb, tx_pwr_dBm = self._decode_action(action, 'cue')
+            rb, tx_pwr_dBm = self._decode_action_for_DUE(action, 'cue',actions)
         else:
             link_type = LinkType.DOWNLINK
-            rb, tx_pwr_dBm = self._decode_action(action, 'mbs')
+            rb, tx_pwr_dBm = self._decode_action_for_DUE(action, 'mbs',actions)
         tx, rx = self.simulator.devices[tx_id], self.simulator.devices[rx_id]
         return Action(tx, rx, link_type, rb, tx_pwr_dBm)
 
@@ -108,6 +119,43 @@ class D2DEnv(gym.Env):
         else:
             raise ValueError(f'Unable to decode action type "{type(action)}"')
         return int(rb), int(tx_pwr_dBm)
+
+    # RE-ALLOCATING THE RB & TX_PWD_DBM FOR DUE PAIRS 
+    def distance_between_UE_pairs(x1,y1,x2,y2) -> float:
+        return math.sqrt(pow(x1-x2,2) + pow(y1-y2,2))
+
+    def isPossibleRbAllocation(self,action: Any,actions:Actions):
+        d2d_radius = 40.0
+        
+        ix_actions = actions.get_actions_by_rb(action.rb).difference({action})
+        for ix_action in ix_actions:
+            # if ix_action.link_type != LinkType.SIDELINK:
+            # considering interference from both (DUE -> CUE) AND (DUE -> DUE)
+            neighbor_x_value = ix_action.tx.position.x
+            neighbor_y_value = ix_action.tx.position.y
+
+            current_x_value = action.tx.position.x
+            current_y_value = action.tx.position.y
+
+            if(self.distance_between_UE_pairs(current_x_value,current_y_value,neighbor_x_value,neighbor_y_value) <= d2d_radius):
+                return False
+        return True
+
+    # For Re-assigning rb and tx_pwr_dBm for DUE such that no other DUE CUE Within radius of transmission
+    def _decode_action_for_DUE(self,action:Any,tx_type: str,actions:Actions) -> Tuple[int,int]:
+        if isinstance(action, (int, np.integer)):
+            rb = action // self.num_pwr_actions[tx_type]
+            tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
+            if(tx_type == "due"):
+                while(self.isPossibleRbAllocation(action,Actions) == False):
+                    action = (action + 1) %  EnvConfig.num_rbs
+                    rb = action // self.num_pwr_actions[tx_type]
+                    tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
+        elif isinstance(action, np.ndarray) and action.ndim == 2:
+            rb, tx_pwr_dBm = action
+        else:
+            raise ValueError(f'Unable to decode action type "{type(action)}"')
+        return int(rb), int(tx_pwr_dBm)    
 
     def _infos(self, actions: Actions, state: dict) -> Dict[str, Any]:
         return {':'.join(id_pair): self._info(action, state) for id_pair, action in actions.items()}
@@ -141,3 +189,12 @@ class D2DEnv(gym.Env):
             } for device in self.simulator.devices.values()}
         with config_file.open(mode='w') as fid:
             json.dump(config, fid)
+
+# class D2DEnv_reward(gym.Env):
+#     def step_reward(self,actions:Actions):
+#         self.state = self.D2DEnv.simulator.step(self.actions)
+#         obs = self.D2DEnv.obs_fn.get_state(self.actions,self.state,self.simulator.devices)
+#         rewards = self.D2DEnv.reward_fn(self.actions,self.state)
+#         info = self.D2DEnv._infos(self.actions, self.state)
+
+#         return obs, rewards, info

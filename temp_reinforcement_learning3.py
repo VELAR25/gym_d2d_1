@@ -1,5 +1,6 @@
 import gym
 import gym_d2d
+import src.gym_d2d.envs.d2d_env as gymD2D
 
 env = gym.make('D2DEnv-v0')
 
@@ -58,7 +59,7 @@ for i in range(1):
     records = {}
 
     determine_color = {}
-    maxEpisodes = 200
+    maxEpisodes = 1
     bestResult = {}
     initial_cummulative_reward_value = 0
     best_cummulative_reward_value = 0
@@ -75,6 +76,17 @@ for i in range(1):
             actions[agent_id] = action
 
         obses, rewards, game_over, infos = env.step(actions)
+
+        # print(rewards)
+
+        # for key,value in rewards.items():
+        #     if(key[0] == 'd' and value == -1.0):
+        #         action = env.action_space['due'].sample()
+        #         actions[key] = action
+
+        # obses, rewards, infos = env.stepReward(actions)
+
+        # print(rewards)
 
         # for storing the {action, state , reward for each UE pair} 
         for key,value in actions.items():
@@ -154,7 +166,7 @@ for i in range(1):
     # Extract x and y coordinates for cue pairs 
     cue_x_values = [cue_details_for_graph[key]["tx"] for key,value in cue_details_for_graph.items()]
     cue_y_values = [cue_details_for_graph[key]["ty"] for key,value in cue_details_for_graph.items()]
-    cue_properties = [cue_details_for_graph[key] for key,value in cue_details_for_graph.items()]
+    cue_properties = [cue_detail for cue_detail in cue_details_for_graph.items()]
 
     # Create trace for D2D communication points
 
@@ -173,10 +185,10 @@ for i in range(1):
     # Extract x and y coordinates for cue pairs 
     due_x_values = [due_details_for_graph[key]["tx"] for key,value in due_details_for_graph.items()]
     due_y_values = [due_details_for_graph[key]["ty"] for key,value in due_details_for_graph.items()]
-    due_properties = [due_details_for_graph[key] for key,value in due_details_for_graph.items()]
+    due_properties = [due_detail for due_detail in due_details_for_graph.items()]
 
     # Create trace for D2D communication points
-
+   
     trace_points_due = go.Scatter(
         x=due_x_values,
         y=due_y_values,
