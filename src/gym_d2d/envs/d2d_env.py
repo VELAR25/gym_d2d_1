@@ -5,6 +5,7 @@ from typing import Dict, Tuple, Any
 import gym
 from gym import spaces
 import numpy as np
+import math
 
 from gym_d2d.actions import Action, Actions
 from gym_d2d.envs.obs_fn import LinearObsFunction
@@ -20,6 +21,7 @@ DEFAULT_OBS_FN = LinearObsFunction
 # DEFAULT_REWARD_FN = SystemCapacityRewardFunction
 # DEFAULT_REWARD_FN = CueSinrShannonRewardFunction
 DEFAULT_REWARD_FN = CueSinrNeighborRewardFunction
+from gym_d2d.envs.env_config import EnvConfig
 
 class D2DEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -69,7 +71,8 @@ class D2DEnv(gym.Env):
         return Actions({**cue_actions, **due_actions})
 
     def step(self, raw_actions: Dict[str, Any]):
-        self.actions = self._extract_actions(raw_actions) 
+        # self.actions = self._extract_actions_new(raw_actions) 
+        self.actions = raw_actions
         self.state = self.simulator.step(self.actions)
         self.num_steps += 1
         obs = self.obs_fn.get_state(self.actions, self.state, self.simulator.devices)
@@ -103,6 +106,73 @@ class D2DEnv(gym.Env):
         if isinstance(action, (int, np.integer)):
             rb = action // self.num_pwr_actions[tx_type]
             tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
+        elif isinstance(action, np.ndarray) and action.ndim == 2:
+            rb, tx_pwr_dBm = action
+        else:
+            raise ValueError(f'Unable to decode action type "{type(action)}"')
+        return int(rb), int(tx_pwr_dBm)
+
+    # MODIFIED CODE 
+
+    def _extract_actions_new(self, raw_actions: Dict[str, Any]) -> Actions:
+        actions = Actions()
+        for id_pair_str, action in raw_actions.items():
+            tx_rx_id = tuple([Id(_id) for _id in id_pair_str.split(':')])
+            actions[tx_rx_id] = self._extract_action_new(*tx_rx_id, action,actions)
+        return actions
+
+    def _extract_action_new(self, tx_id: Id, rx_id: Id, action: Any,actions: Actions) -> Action:
+        if tx_id in self.simulator.devices.due_pairs:
+            link_type = LinkType.SIDELINK
+            rb, tx_pwr_dBm = self._decode_action_new(action, 'due',actions,tx_id,rx_id)
+        elif tx_id in self.simulator.devices.cues:
+            link_type = LinkType.UPLINK
+            rb, tx_pwr_dBm = self._decode_action_new(action, 'cue',actions,tx_id,rx_id)
+        else:
+            link_type = LinkType.DOWNLINK
+            rb, tx_pwr_dBm = self._decode_action_new(action, 'mbs',actions,tx_id,rx_id)
+        tx, rx = self.simulator.devices[tx_id], self.simulator.devices[rx_id]
+        return Action(tx, rx, link_type, rb, tx_pwr_dBm)
+    
+    # RE-ALLOCATING THE RB & TX_PWD_DBM FOR DUE PAIRS 
+    def distance_between_UE_pairs(x1,y1,x2,y2) -> float:
+        return math.sqrt(pow(x1-x2,2) + pow(y1-y2,2))
+
+    def isPossibleRbAllocation(self,rb: int,actions:Actions,tx_id:Id,rx_id:Id):
+        d2d_radius = 40.0
+        
+        ix_actions = actions.get_actions_by_rb(rb)
+        tx, rx = self.simulator.devices[tx_id], self.simulator.devices[rx_id]
+        for ix_action in ix_actions:
+            # if ix_action.link_type != LinkType.SIDELINK:
+            # considering interference from both (DUE -> CUE) AND (DUE -> DUE)
+            neighbor_x_value = ix_action.tx.position.x
+            neighbor_y_value = ix_action.tx.position.y
+
+            current_x_value = tx.position.as_tuple()[0]
+            current_y_value = rx.position.as_tuple()[1]
+
+            if(math.sqrt(pow(current_x_value - neighbor_x_value,2) + pow(current_y_value - neighbor_y_value,2)) <= d2d_radius):
+                return False
+        return True
+
+    # For Re-assigning rb and tx_pwr_dBm for DUE such that no other DUE CUE Within radius of transmission
+    def _decode_action_new(self,action:Any,tx_type: str,actions:Actions,tx_id:Id,rx_id:Id) -> Tuple[int,int]:
+        if isinstance(action, (int, np.integer)):
+            rb = action // self.num_pwr_actions[tx_type]
+            tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
+            if(tx_type == "due"):
+                while(self.isPossibleRbAllocation(rb,actions,tx_id,rx_id) == False):
+                    # print(tx_id,rb)
+                    action = (action + self.num_pwr_actions[tx_type])
+                    rb = action // self.num_pwr_actions[tx_type]
+                    tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
+            else:
+                while(self.isPossibleRbAllocation(rb,actions,tx_id,rx_id) == False):
+                    # print(tx_id,rb)
+                    action = (action + self.num_pwr_actions[tx_type])
+                    rb = action // self.num_pwr_actions[tx_type]
+                    tx_pwr_dBm = action % self.num_pwr_actions[tx_type]
         elif isinstance(action, np.ndarray) and action.ndim == 2:
             rb, tx_pwr_dBm = action
         else:

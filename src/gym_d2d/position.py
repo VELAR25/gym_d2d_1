@@ -23,8 +23,8 @@ def get_random_position(radius: float) -> Position:
     """
     theta = 2 * pi * random.random()
     r = radius * sqrt(random.random())
-    x = r * cos(theta)
-    y = r * sin(theta)
+    x = round(r * cos(theta), 1)
+    y = round(r * sin(theta),1)
     return Position(x, y)
 
 
@@ -40,6 +40,6 @@ def get_random_position_nearby(radius: float, anchor_pos: Position, anchor_radiu
     while x**2 + y**2 > radius**2:
         theta = 2 * pi * random.random()
         r = anchor_radius * sqrt(random.random())
-        x = anchor_pos.x + r * cos(theta)
-        y = anchor_pos.y + r * sin(theta)
+        x = round(anchor_pos.x + r * cos(theta),1)
+        y = round(anchor_pos.y + r * sin(theta),1)
     return Position(x, y)
