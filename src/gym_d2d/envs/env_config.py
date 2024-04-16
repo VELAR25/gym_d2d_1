@@ -9,9 +9,15 @@ from gym_d2d.traffic_model import TrafficModel, UplinkTrafficModel
 
 @dataclass
 class EnvConfig:
+<<<<<<< HEAD
     num_rbs: int = 100
     num_cues: int = 100
     num_due_pairs: int = 100
+=======
+    num_rbs: int = 25
+    num_cues: int = 25
+    num_due_pairs: int = 25
+>>>>>>> 0ccb5f990060527e1eb1fde156ac6f90b1a7ae19
     cell_radius_m: float = 500.0
     d2d_radius_m: float = 40.0          #20/25
     due_min_tx_power_dBm: int = 0
